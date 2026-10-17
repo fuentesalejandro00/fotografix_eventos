@@ -134,6 +134,15 @@ details.cfg[open] summary{margin-bottom:10px}
 .kmm{font:600 10.5px/1 var(--mono);background:#fff;color:#14181C;border:1.5px solid #14181C;border-radius:3px;padding:2px 4px;white-space:nowrap;transform:translate(-50%,-50%);display:inline-block}
 .flag{font:700 12px/1 var(--display);letter-spacing:.12em;background:#14181C;color:#fff;padding:5px 8px;border-radius:4px;white-space:nowrap;transform:translate(-50%,-130%);display:inline-block;box-shadow:0 2px 6px rgba(0,0,0,.3)}
 .flag.meta{background:repeating-conic-gradient(#14181C 0 25%,#fff 0 50%) 0 0/8px 8px;color:#14181C;text-shadow:0 0 3px #fff,0 0 3px #fff}
+.kmm.r2{border-color:#E8590C;color:#B33F00}
+.kmpair{display:inline-flex;gap:3px;transform:translate(-50%,-50%)}
+.kmpair .kmm{transform:none}
+.flag.r2{background:#E8590C}
+.flag.meta.r2{background:repeating-conic-gradient(#E8590C 0 25%,#fff 0 50%) 0 0/8px 8px;color:#14181C}
+.legend{background:#fff;color:#14181C;border-radius:6px;padding:6px 10px;box-shadow:0 1px 4px rgba(0,0,0,.25);font:600 13px/1.5 var(--display);letter-spacing:.03em}
+.legend i{display:inline-block;width:20px;height:5px;border-radius:3px;margin-right:7px;vertical-align:middle}
+.legend i.r2{background:repeating-linear-gradient(90deg,#E8590C 0 6px,transparent 6px 10px)}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:4px}
 .vtx{width:10px;height:10px;border-radius:50%;background:#fff;border:2px solid var(--accent)}
 .toast{position:fixed;z-index:1000;bottom:calc(20px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 14px;border-radius:8px;font-size:13px;box-shadow:var(--shadow)}
 body.viewer .edit-only{display:none!important}
@@ -219,6 +228,28 @@ body:not(.viewer) .view-only{display:none!important}
         </div>
         <label class="check"><input type="checkbox" id="cSnap" checked> Seguir las calles al trazar</label>
         <p class="hint" style="margin:0">Haz clic en el mapa punto por punto en el sentido de la carrera. Con “Seguir las calles” activo, cada tramo se ajusta a la calle más cercana. Si trazas desde la salida, el kilometraje sale solo.</p>
+        <div class="sec-h">Segunda distancia</div>
+        <p class="hint" style="margin:0">Para carreras con dos distancias (ej. 10K y 5K). Sube el recorrido de la otra distancia: se dibuja encima en naranja con sus propios kilómetros, y los spots en tramos compartidos muestran el km de las dos.</p>
+        <label class="drop" id="drop2" for="fileRoute2">
+          <strong id="drop2Title">Subir segunda ruta</strong>
+          <span class="hint">GPX, KML, KMZ o GeoJSON</span>
+          <input type="file" id="fileRoute2" accept=".gpx,.kml,.kmz,.geojson,.json" hidden>
+        </label>
+        <div id="altBox" style="display:grid;gap:16px" hidden>
+          <div class="row2">
+            <label class="f"><span><i class="sw" style="background:var(--accent)"></i>Nombre ruta principal</span><input type="text" id="eDist1" placeholder="ej. 10K"></label>
+            <label class="f"><span><i class="sw" style="background:#E8590C"></i>Nombre segunda ruta</span><input type="text" id="aName" placeholder="ej. 5K"></label>
+          </div>
+          <div class="row2">
+            <label class="f">Km oficiales por vuelta<input type="text" id="aOfficial" inputmode="decimal" placeholder="ej. 5"></label>
+            <label class="f">Vueltas<input type="text" id="aLaps" inputmode="numeric" placeholder="1"></label>
+          </div>
+          <p class="hint" style="margin:0" id="altHint"></p>
+          <div class="btns">
+            <button class="btn" id="bReverse2">Invertir sentido</button>
+            <button class="btn danger" id="bClear2">Quitar segunda ruta</button>
+          </div>
+        </div>
         <div class="sec-h">Mostrar</div>
         <label class="check"><input type="checkbox" id="cKm" checked> Marcas de kilómetro sobre la ruta</label>
       </section>
@@ -324,7 +355,8 @@ let state=null, viewer=null;
   if(!parts.v)return;
   try{
     const d=JSON.parse(LZString.decompressFromEncodedURIComponent(parts.v));
-    state={event:Object.assign(blankEvent(),d.e),route:d.r||[],spots:(d.s||[]).map(s=>({id:uid(),name:s[0],lat:s[1],lng:s[2],kmLabel:s[3]||'',ph:s[4]||[],km:s[5]??null}))};
+    state={event:Object.assign(blankEvent(),d.e),route:d.r||[],spots:(d.s||[]).map(s=>({id:uid(),name:s[0],lat:s[1],lng:s[2],kmLabel:s[3]||'',ph:s[4]||[],km:s[5]??null,km2:s[6]??null})),
+      alt:d.a?{name:d.a.n||'',route:d.a.r||[],official:d.a.o||'',laps:d.a.l||''}:null};
     viewer={f:parts.f?decodeURIComponent(parts.f):''};
     document.body.classList.add('viewer');
   }catch(e){console.warn(e)}
@@ -334,11 +366,23 @@ if(!state)state=load()||sample();
 /* ---------- geometry ---------- */
 const R=6371008.8, rad=d=>d*Math.PI/180;
 function hav(a,b){const dLat=rad(b[0]-a[0]),dLng=rad(b[1]-a[1]);const x=Math.sin(dLat/2)**2+Math.cos(rad(a[0]))*Math.cos(rad(b[0]))*Math.sin(dLng/2)**2;return 2*R*Math.asin(Math.sqrt(x))}
-let cum=[0];
-function computeCum(){cum=[0];for(let i=1;i<state.route.length;i++)cum.push(cum[i-1]+hav(state.route[i-1],state.route[i]))}
-const total=()=>cum[cum.length-1]||0;
-function snap(lat,lng,pref){
-  const r=state.route; if(r.length<2)return{lat,lng,km:null};
+/* dos rutas posibles: R1 = ruta principal (state.route), R2 = segunda distancia (state.alt.route) */
+const TOL=40; // m: un spot a esta distancia o menos de una ruta cuenta como "sobre" esa ruta
+function mkRoute(pts,official,lp){
+  const cum=[0];for(let i=1;i<pts.length;i++)cum.push(cum[i-1]+hav(pts[i-1],pts[i]));
+  const tot=cum[cum.length-1]||0;
+  const o=parseFloat(String(official||'').replace(',','.'));
+  const lk=o>0?o:tot/1000; // distancia oficial: el trazo del mapa nunca mide exacto, se escala a los km oficiales
+  return{pts,cum,total:tot,lapKm:lk,factor:tot?lk/(tot/1000):1,laps:Math.max(1,parseInt(lp)||1)};
+}
+let R1=mkRoute([]),R2=null;
+function computeCum(){
+  R1=mkRoute(state.route,state.event.official,state.event.laps);
+  const a=state.alt;R2=a&&a.route&&a.route.length>1?mkRoute(a.route,a.official,a.laps):null;
+}
+const total=()=>R1.total;
+function snapOn(Rt,lat,lng,pref){
+  const r=Rt.pts,cum=Rt.cum; if(r.length<2)return{lat,lng,km:null,d:Infinity};
   const k=Math.cos(rad(lat)), P=[lng*k*111320,lat*110540];
   const cands=[];
   for(let i=0;i<r.length-1;i++){
@@ -353,10 +397,21 @@ function snap(lat,lng,pref){
   if(pref!=null)best=near.reduce((a,c)=>Math.abs(c.km-pref)<Math.abs(a.km-pref)?c:a); // ruta que pasa dos veces: quedarse en el tramo más cercano al km anterior
   else best=near.reduce((a,c)=>c.d<a.d?c:a);
   const a=r[best.i],b=r[best.i+1];
-  return{lat:a[0]+(b[0]-a[0])*best.t,lng:a[1]+(b[1]-a[1])*best.t,km:best.km};
+  return{lat:a[0]+(b[0]-a[0])*best.t,lng:a[1]+(b[1]-a[1])*best.t,km:best.km,d:minD};
 }
-function pointAt(m){
-  const r=state.route;
+// pega el punto a la ruta más cercana y calcula el km en cada ruta que pase por ahí
+function placeOn(lat,lng,prev){
+  prev=prev||{};
+  const a=R1.pts.length>1?snapOn(R1,lat,lng,prev.km):null, b=R2?snapOn(R2,lat,lng,prev.km2):null;
+  if(!a&&!b)return{lat,lng,km:null,km2:null};
+  const near=(!b||(a&&a.d<=b.d))?a:b;
+  const a2=a&&near!==a?snapOn(R1,near.lat,near.lng,prev.km):a;
+  const b2=b&&near!==b?snapOn(R2,near.lat,near.lng,prev.km2):b;
+  const on1=!!a2&&(!b2||near===a||a2.d<=TOL), on2=!!b2&&(!a2||near===b||b2.d<=TOL);
+  return{lat:near.lat,lng:near.lng,km:on1?a2.km:null,km2:on2?b2.km:null};
+}
+function pointOn(Rt,m){
+  const r=Rt.pts,cum=Rt.cum;
   for(let i=1;i<r.length;i++){if(cum[i]>=m){const t=(m-cum[i-1])/((cum[i]-cum[i-1])||1);return[r[i-1][0]+(r[i][0]-r[i-1][0])*t,r[i-1][1]+(r[i][1]-r[i-1][1])*t]}}
   return r[r.length-1];
 }
@@ -369,16 +424,23 @@ function simplify(pts,tol){ // Douglas–Peucker in degrees
     if(md>tol){keep[mi]=1;st.push([s,mi],[mi,e])}}
   return pts.filter((_,i)=>keep[i]);
 }
-const kmOf=s=>state.route.length>1&&s.km!=null?s.km:null;
-function resnapAll(){state.spots.forEach(s=>{s.km=state.route.length>1?snap(s.lat,s.lng,s.km).km:null})}
-// distancia oficial: el trazo del mapa nunca mide exacto, se escala a los km oficiales
-const lapKm=()=>{const o=parseFloat(String(state.event.official||'').replace(',','.'));return o>0?o:total()/1000};
-const factor=()=>total()?lapKm()/(total()/1000):1;
-const laps=()=>Math.max(1,parseInt(state.event.laps)||1);
-const offKm=km=>km*factor();
-const kmAuto=km=>{const a=offKm(km),L=lapKm(),n=laps();const parts=[];for(let i=0;i<n;i++)parts.push((a+i*L).toFixed(1));return 'KM '+parts.join(' / ')};
-const kmText=s=>s.kmLabel||(kmOf(s)!=null?kmAuto(kmOf(s)):'');
-function sortedSpots(){return state.spots.map(s=>({s,km:kmOf(s)??0})).sort((a,b)=>a.km-b.km).map(x=>x.s)}
+const kmOf=s=>R1.pts.length>1&&s.km!=null?s.km:null;
+const km2Of=s=>R2&&s.km2!=null?s.km2:null;
+function resnapAll(){state.spots.forEach(s=>{const p=placeOn(s.lat,s.lng,s);s.km=p.km;s.km2=p.km2})}
+const lapKm=()=>R1.lapKm, factor=()=>R1.factor, laps=()=>R1.laps;
+const kmAutoOn=(Rt,km)=>{const a=km*Rt.factor,L=Rt.lapKm,n=Rt.laps;const parts=[];for(let i=0;i<n;i++)parts.push((a+i*L).toFixed(1));return 'KM '+parts.join(' / ')};
+const name1=()=>state.event.dist1||'Ruta 1', name2=()=>(state.alt&&state.alt.name)||'Ruta 2';
+function autoText(s){const p=[],k1=kmOf(s),k2=km2Of(s);
+  if(k1!=null)p.push((R2?name1()+' ':'')+kmAutoOn(R1,k1));
+  if(k2!=null)p.push(name2()+' '+kmAutoOn(R2,k2));
+  return p.join(' · ')}
+const kmText=s=>s.kmLabel||autoText(s);
+function shortKm(s){const k1=kmOf(s),k2=km2Of(s),p=[];
+  if(k1!=null)p.push((R2?name1()+' ':'')+(k1*R1.factor).toFixed(1));
+  if(k2!=null)p.push(name2()+' '+(k2*R2.factor).toFixed(1));
+  return p.length?p.join(' · ')+' km':''}
+// orden: primero los spots de la ruta principal por km; luego los que solo están en la segunda
+function sortedSpots(){return state.spots.map(s=>({s,k:kmOf(s)??(km2Of(s)!=null?1e4+km2Of(s):0)})).sort((a,b)=>a.k-b.k).map(x=>x.s)}
 function colorOf(s){return COLORS[state.spots.indexOf(s)%COLORS.length]}
 const gmaps=s=>`https://www.google.com/maps/search/?api=1&query=${s.lat.toFixed(6)},${s.lng.toFixed(6)}`;
 
@@ -400,36 +462,60 @@ const farCheck=()=>map.getContainer().classList.toggle('far',map.getZoom()<15);m
 let tileOk=0,tileErr=0;
 Object.values(bases).forEach(g=>(g.eachLayer?g.getLayers():[g]).forEach(l=>{l.on('tileload',()=>{tileOk++;$('#tileWarn').hidden=true});l.on('tileerror',()=>{tileErr++;if(!tileOk&&tileErr>3)$('#tileWarn').hidden=false})}));
 
+const R2COLOR='#E8590C';
+const ACCENT=getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#2447F5';
+const route2Case=L.polyline([],{color:'#fff',weight:9,opacity:.9,interactive:false}).addTo(map); // debajo de la ruta principal
 const routeCase=L.polyline([],{color:'#fff',weight:10,opacity:.9,interactive:false}).addTo(map);
-const routeLine=L.polyline([],{color:getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#2447F5',weight:5,opacity:.95}).addTo(map);
+const routeLine=L.polyline([],{color:ACCENT,weight:5,opacity:.95}).addTo(map);
+const route2Line=L.polyline([],{color:R2COLOR,weight:4,opacity:.95,dashArray:'10 8',interactive:false}).addTo(map); // punteada encima: en tramos compartidos se ven las dos
 const kmLayer=L.layerGroup().addTo(map);
 const flagLayer=L.layerGroup().addTo(map);
 const spotLayer=L.layerGroup().addTo(map);
 const markers=new Map();
+const legend=L.control({position:'bottomleft'});legend.onAdd=()=>L.DomUtil.create('div','legend');let legendOn=false;
+const kmTot=Rt=>+(Rt.lapKm*Rt.laps).toFixed(1);
+const setVal=(sel,v)=>{const el=$(sel);v=v||'';if(el&&document.activeElement!==el&&el.value!==v)el.value=v};
+
+function kmMarks(Rt){
+  const out=[];if(Rt.pts.length<2)return out;
+  const Lk=Rt.lapKm,n=Math.floor(Lk+1e-6),f=Rt.factor,nl=Rt.laps;const step=n>60?5:1;
+  for(let k=step;k<=n;k+=step){if(Math.abs(k-Lk)<0.05)continue;
+    out.push({pt:pointOn(Rt,k*1000/f),lbl:Array.from({length:nl},(_,i)=>(k+i*Lk)%1?(k+i*Lk).toFixed(1)+'K':(k+i*Lk)+'K').join('/')})}
+  return out;
+}
+const divMark=(pt,html,layer)=>L.marker(pt,{interactive:false,icon:L.divIcon({className:'',html,iconSize:[0,0]})}).addTo(layer);
+function routeEnds(Rt){const r=Rt.pts,c=hav(r[0],r[r.length-1])<60;return c?[[r[0],'SALIDA · META','']]:[[r[0],'SALIDA',''],[r[r.length-1],'META','meta']]}
 
 function renderRoute(fit){
   computeCum();
   resnapAll();
   routeCase.setLatLngs(state.route);routeLine.setLatLngs(state.route);
+  const r2=R2?R2.pts:[];route2Case.setLatLngs(r2);route2Line.setLatLngs(r2);
   kmLayer.clearLayers();flagLayer.clearLayers();
   const r=state.route;
-  if(r.length>1){
-    if($('#cKm').checked){const Lk=lapKm(),n=Math.floor(Lk+1e-6),f=factor(),nl=laps();const step=n>60?5:1;
-      for(let k=step;k<=n;k+=step){if(Math.abs(k-Lk)<0.05)continue;
-        const lbl=Array.from({length:nl},(_,i)=>(k+i*Lk)%1?(k+i*Lk).toFixed(1)+'K':(k+i*Lk)+'K').join('/');
-        L.marker(pointAt(k*1000/f),{interactive:false,icon:L.divIcon({className:'',html:`<span class="kmm">${lbl}</span>`,iconSize:[0,0]})}).addTo(kmLayer)}}
-    const closed=hav(r[0],r[r.length-1])<60;
-    L.marker(r[0],{interactive:false,icon:L.divIcon({className:'',html:`<span class="flag">${closed?'SALIDA · META':'SALIDA'}</span>`,iconSize:[0,0]})}).addTo(flagLayer);
-    if(!closed)L.marker(r[r.length-1],{interactive:false,icon:L.divIcon({className:'',html:'<span class="flag meta">META</span>',iconSize:[0,0]})}).addTo(flagLayer);
+  if($('#cKm').checked){
+    const m1=kmMarks(R1),m2=R2?kmMarks(R2):[];
+    m2.forEach(b=>{const a=m1.find(a=>!a.pair&&hav(a.pt,b.pt)<90);if(a){a.pair=b;b.paired=true}}); // misma marca en tramo compartido: se juntan
+    m1.forEach(a=>divMark(a.pt,a.pair?`<span class="kmpair"><span class="kmm">${a.lbl}</span><span class="kmm r2">${a.pair.lbl}</span></span>`:`<span class="kmm">${a.lbl}</span>`,kmLayer));
+    m2.forEach(b=>{if(!b.paired)divMark(b.pt,`<span class="kmm r2">${b.lbl}</span>`,kmLayer)});
   }
+  const e1=R1.pts.length>1?routeEnds(R1):[],e2=R2?routeEnds(R2):[];
+  e1.forEach(([pt,t,c])=>{const shared=e2.some(x=>hav(x[0],pt)<60);divMark(pt,`<span class="flag ${c}">${t}${R2&&!shared?' '+esc(name1()):''}</span>`,flagLayer)});
+  e2.forEach(([pt,t,c])=>{if(!e1.some(x=>hav(x[0],pt)<60))divMark(pt,`<span class="flag ${c} r2">${t} ${esc(name2())}</span>`,flagLayer)});
+  if(R2){if(!legendOn){legend.addTo(map);legendOn=true}
+    legend.getContainer().innerHTML=(r.length>1?`<div><i style="background:${ACCENT}"></i>${esc(name1())} · ${kmTot(R1)} km</div>`:'')+`<div><i class="r2"></i>${esc(name2())} · ${kmTot(R2)} km</div>`;
+  }else if(legendOn){legend.remove();legendOn=false}
   if(fit)fitAll();
-  $('#stKm').textContent=(lapKm()*laps()).toFixed(1);
-  const dh=$('#distHint');if(dh)dh.textContent=r.length>1?`El trazo mide ${(total()/1000).toFixed(2)} km en el mapa. `+(state.event.official?`Los kilómetros se ajustan a ${lapKm()} km oficiales por vuelta.`:'Escribe la distancia oficial para que las marcas coincidan con el mapa de la carrera.'):'';
+  $('#stKm').textContent=R2?(r.length>1?kmTot(R1)+' / ':'')+kmTot(R2):(lapKm()*laps()).toFixed(1);
+  const dh=$('#distHint');if(dh)dh.textContent=r.length>1?(R2?name1()+': ':'')+`El trazo mide ${(total()/1000).toFixed(2)} km en el mapa. `+(state.event.official?`Los kilómetros se ajustan a ${lapKm()} km oficiales por vuelta.`:'Escribe la distancia oficial para que las marcas coincidan con el mapa de la carrera.'):'';
+  const a=state.alt;$('#altBox').hidden=!a;$('#drop2Title').textContent=a?'Reemplazar segunda ruta':'Subir segunda ruta';
+  if(a){setVal('#eDist1',state.event.dist1);setVal('#aName',a.name);setVal('#aOfficial',a.official);setVal('#aLaps',a.laps);
+    $('#altHint').textContent=R2?`El trazo mide ${(R2.total/1000).toFixed(2)} km en el mapa. `+(a.official?`Los kilómetros se ajustan a ${R2.lapKm} km oficiales por vuelta.`:'Escribe la distancia oficial para que las marcas coincidan con el mapa de la carrera.'):''}
   $('#sampleNote').hidden=!state.sample;
   $('#bUndo').disabled=!drawStack.length;
 }
 function fitAll(){
-  const pts=[...state.route,...state.spots.map(s=>[s.lat,s.lng])];
+  const pts=[...state.route,...(state.alt&&state.alt.route||[]),...state.spots.map(s=>[s.lat,s.lng])];
   if(pts.length)map.fitBounds(L.latLngBounds(pts),{padding:[40,40],maxZoom:16});
 }
 
@@ -444,9 +530,9 @@ function renderSpots(){
   spotLayer.clearLayers();markers.clear();
   sortedSpots().forEach((s,i)=>{
     const m=L.marker([s.lat,s.lng],{draggable:!viewer,icon:L.divIcon({className:'',html:pinHtml(s,i+1),iconSize:[28,28],iconAnchor:[14,14]}),zIndexOffset:highlight===s.id?1000:0,autoPan:true});
-    let dk=s.km;
-    m.on('drag',e=>{if(state.route.length>1){const p=snap(e.latlng.lat,e.latlng.lng,dk);dk=p.km;m.setLatLng([p.lat,p.lng])}});
-    m.on('dragend',()=>{const ll=m.getLatLng();s.lat=ll.lat;s.lng=ll.lng;s.km=dk;save();renderAll()});
+    let dk={km:s.km,km2:s.km2};
+    m.on('drag',e=>{if(R1.pts.length>1||R2){dk=placeOn(e.latlng.lat,e.latlng.lng,dk);m.setLatLng([dk.lat,dk.lng])}});
+    m.on('dragend',()=>{const ll=m.getLatLng();s.lat=ll.lat;s.lng=ll.lng;s.km=dk.km;s.km2=dk.km2;save();renderAll()});
     m.on('click',()=>selectSpot(s.id,false));
     m.addTo(spotLayer);markers.set(s.id,m);
   });
@@ -467,13 +553,13 @@ function renderList(){
   const list=sortedSpots();
   if(!list.length){box.innerHTML='<div class="empty">Aún no hay spots. Usa “Agregar spot en el mapa” y haz clic sobre la ruta.</div>';return}
   box.innerHTML=list.map((s,i)=>{
-    const auto=kmOf(s);
+    const auto=autoText(s);
     return`<div class="spot${highlight===s.id?' hl':''}" data-id="${s.id}">
       <div class="spot-h"><span class="num" style="--c:${colorOf(s)}">${i+1}</span>
         <input type="text" id="n-${s.id}" data-k="name" value="${esc(s.name)}" aria-label="Nombre del spot">
-        <span class="km">${auto!=null?offKm(auto).toFixed(1)+' km':''}</span></div>
+        <span class="km">${esc(shortKm(s))}</span></div>
       <div class="spot-grid">
-        <label class="f">Km oficial<input type="text" id="k-${s.id}" data-k="kmLabel" value="${esc(s.kmLabel)}" placeholder="${auto!=null?kmAuto(auto):'KM'}"></label>
+        <label class="f">Km oficial<input type="text" id="k-${s.id}" data-k="kmLabel" value="${esc(s.kmLabel)}" placeholder="${esc(auto||'KM')}"></label>
         <label class="f">Fotógrafos (uno por línea)<textarea id="p-${s.id}" data-k="ph" rows="${Math.max(2,s.ph.length)}">${esc(s.ph.join('\n'))}</textarea></label>
       </div>
       <div class="spot-actions">
@@ -513,8 +599,8 @@ $('#bPlace').onclick=()=>{switchTab('spots');setMode(mode==='place'?null:'place'
 $('#bDraw').onclick=()=>setMode(mode==='draw'?null:'draw');
 map.on('click',async e=>{
   if(mode==='place'){
-    const p=snap(e.latlng.lat,e.latlng.lng);
-    const s={id:uid(),name:'Spot '+(state.spots.length+1),lat:p.lat,lng:p.lng,kmLabel:'',ph:[],km:p.km};
+    const p=placeOn(e.latlng.lat,e.latlng.lng);
+    const s={id:uid(),name:'Spot '+(state.spots.length+1),lat:p.lat,lng:p.lng,kmLabel:'',ph:[],km:p.km,km2:p.km2};
     state.spots.push(s);state.sample=false;save();setMode(null);highlight=s.id;renderAll();
     const inp=document.getElementById('n-'+s.id);if(inp){inp.focus();inp.select()}
   }else if(mode==='draw'){
@@ -573,16 +659,24 @@ function parseGeoJSON(j){
     if(g.type==='Point')points.push({name:nm,lat:g.coordinates[1],lng:g.coordinates[0]});});
   return{line,points};
 }
-async function importRoute(file){
+async function importRoute(file,second){
   const n=file.name.toLowerCase();let res;
   try{
     if(n.endsWith('.kmz')){const zip=await JSZip.loadAsync(file);const k=Object.keys(zip.files).find(x=>x.toLowerCase().endsWith('.kml'));if(!k)throw new Error('KMZ sin KML');res=parseKML(await zip.file(k).async('string'))}
     else{const t=await file.text();
       if(n.endsWith('.gpx'))res=parseGPX(t);
       else if(n.endsWith('.kml'))res=parseKML(t);
-      else{const j=JSON.parse(t);if(j.fotografix){loadEvent(j);return}res=parseGeoJSON(j)}}
+      else{const j=JSON.parse(t);if(j.fotografix){if(second){toast('Ese archivo es un evento completo; ábrelo desde “Enviar → Abrir evento”');return}loadEvent(j);return}res=parseGeoJSON(j)}}
   }catch(err){toast('No se pudo leer el archivo: '+err.message);return}
   const line=res.line.filter(p=>isFinite(p[0])&&isFinite(p[1]));
+  if(second){ // segunda distancia: solo la línea; los puntos del archivo no se importan
+    if(line.length<2){toast('El archivo no trae una ruta (línea)');return}
+    state.alt=Object.assign({name:'',official:'',laps:''},state.alt||{},{route:line});state.sample=false;
+    save();renderAll(true);
+    toast(`Segunda ruta cargada: ${(R2.total/1000).toFixed(2)} km`+(res.points.length?' · sus puntos no se importaron':''));
+    if(!state.alt.name)setTimeout(()=>{const el=$('#aName');el&&el.focus()},50);
+    return;
+  }
   if(line.length<2&&!res.points.length){toast('El archivo no trae una ruta (línea) ni puntos');return}
   if(state.sample){state.spots=[];state.sample=false}
   if(line.length>=2){state.route=line;drawStack=[]}
@@ -590,11 +684,19 @@ async function importRoute(file){
   save();renderAll(true);
   toast(`Ruta cargada: ${(total()/1000).toFixed(2)} km${res.points.length?` · ${res.points.length} puntos importados como spots`:''}`);
 }
-$('#fileRoute').onchange=e=>{const f=e.target.files[0];if(f)importRoute(f);e.target.value=''};
-const drop=$('#drop');
-['dragenter','dragover'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add('over')}));
-['dragleave','drop'].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove('over')}));
-drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)importRoute(f)});
+function dropZone(el,input,second){
+  input.onchange=e=>{const f=e.target.files[0];if(f)importRoute(f,second);e.target.value=''};
+  ['dragenter','dragover'].forEach(t=>el.addEventListener(t,e=>{e.preventDefault();el.classList.add('over')}));
+  ['dragleave','drop'].forEach(t=>el.addEventListener(t,e=>{e.preventDefault();el.classList.remove('over')}));
+  el.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)importRoute(f,second)});
+}
+dropZone($('#drop'),$('#fileRoute'),false);
+dropZone($('#drop2'),$('#fileRoute2'),true);
+/* segunda distancia: nombres, km oficiales, invertir, quitar */
+$('#eDist1').addEventListener('input',e=>{state.event.dist1=e.target.value;save();renderAll()});
+[['#aName','name'],['#aOfficial','official'],['#aLaps','laps']].forEach(([sel,k])=>$(sel).addEventListener('input',e=>{if(!state.alt)return;state.alt[k]=e.target.value;save();renderAll()}));
+$('#bReverse2').onclick=()=>{if(!state.alt)return;state.alt.route.reverse();save();renderAll();toast('Sentido de la segunda ruta invertido')};
+armButton($('#bClear2'),'¿Quitar la segunda ruta?',()=>{state.alt=null;save();renderAll()});
 
 /* ---------- event brief ---------- */
 const fields={eName:'name',eDate:'date',eStart:'start',ePlace:'place',eFormat:'format',eFormatNote:'formatNote',eLimit:'limit',eClosing:'closing',eNotes:'notes',cKey:'key',cSecret:'secret',cPath:'path',cNote:'pathNote',eOfficial:'official',eLaps:'laps'};
@@ -617,8 +719,10 @@ function pack(){
   const e=Object.assign({},state.event);if(!e.incCred){e.key='';e.secret=''}delete e.incCred;
   Object.keys(e).forEach(k=>{if(!e[k])delete e[k]});
   const r=simplify(state.route,0.00003).map(p=>[+p[0].toFixed(5),+p[1].toFixed(5)]);
-  const s=sortedSpots().map(x=>[x.name,+x.lat.toFixed(6),+x.lng.toFixed(6),x.kmLabel||kmText(x),x.ph,x.km!=null?+x.km.toFixed(3):null]);
-  return LZString.compressToEncodedURIComponent(JSON.stringify({e,r,s}));
+  const s=sortedSpots().map(x=>[x.name,+x.lat.toFixed(6),+x.lng.toFixed(6),x.kmLabel||kmText(x),x.ph,x.km!=null?+x.km.toFixed(3):null,x.km2!=null?+x.km2.toFixed(3):null]);
+  const o={e,r,s},A=state.alt;
+  if(A&&A.route&&A.route.length>1)o.a={n:A.name||'',r:simplify(A.route,0.00003).map(p=>[+p[0].toFixed(5),+p[1].toFixed(5)]),o:A.official||'',l:A.laps||''};
+  return LZString.compressToEncodedURIComponent(JSON.stringify(o));
 }
 function shareLink(f){
   const dep=depId();const fq=f?'&f='+encodeURIComponent(f):'';
@@ -632,6 +736,7 @@ function buildMsg(){
   if(e.date)L.push(fmtDate(e.date));
   if(e.start||e.place)L.push(`Arranque: ${[e.start,e.place].filter(Boolean).join(' · ')}`);
   if(e.format||e.formatNote){L.push('','*Formato de las fotos*');e.format&&L.push(e.format);e.formatNote&&L.push(e.formatNote)}
+  if(R2)L.push(`Distancias: ${R1.pts.length>1?name1()+' ('+kmTot(R1)+' km) y ':''}${name2()} (${kmTot(R2)} km)`);
   L.push('','*Spots*');
   sortedSpots().forEach((s,i)=>{L.push(`${i+1}. ${s.name}${kmText(s)?' ('+kmText(s)+')':''}`);L.push(`   ${s.ph.length?s.ph.join(', '):'Sin asignar'}`);L.push(`   ${gmaps(s)}`)});
   if(e.path||(e.incCred&&(e.key||e.secret))){L.push('','*Subida (Cyberduck)*');
@@ -662,7 +767,7 @@ $('#bExport').onclick=()=>{
   document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),2000);
 };
 $('#fileEvent').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;try{const j=JSON.parse(await f.text());if(j.fotografix)loadEvent(j);else importRoute(f)}catch(err){toast('Ese archivo no es un evento de Fotografix')}};
-function loadEvent(j){state={event:Object.assign(blankEvent(),j.event),route:j.route||[],spots:(j.spots||[]).map(s=>Object.assign({id:uid(),kmLabel:'',ph:[]},s))};drawStack=[];highlight=null;save();fillBrief();renderAll(true);toast('Evento abierto')}
+function loadEvent(j){state={event:Object.assign(blankEvent(),j.event),route:j.route||[],alt:j.alt||null,spots:(j.spots||[]).map(s=>Object.assign({id:uid(),kmLabel:'',ph:[]},s))};drawStack=[];highlight=null;save();fillBrief();renderAll(true);toast('Evento abierto')}
 
 async function copy(text,ok){
   try{await navigator.clipboard.writeText(text);toast(ok)}
@@ -688,9 +793,10 @@ async function apiPost(body){
   const r=await fetch(cloud.url,{method:'POST',body:JSON.stringify(Object.assign({token:cloud.token,pass:teamPass},body))}); // text/plain: sin preflight
   const j=await r.json();if(j.error)throw new Error(j.error);return j;
 }
-function routeForSheet(){ // una celda aguanta 50,000 caracteres
+function routeForSheet(pts,max){ // una celda aguanta 50,000 caracteres
+  pts=pts||state.route;max=max||45000;
   let tol=0.000005,r;
-  do{r=simplify(state.route,tol).map(p=>[+p[0].toFixed(6),+p[1].toFixed(6)]);tol*=2}while(JSON.stringify(r).length>45000);
+  do{r=simplify(pts,tol).map(p=>[+p[0].toFixed(6),+p[1].toFixed(6)]);tol*=2}while(JSON.stringify(r).length>max);
   return r;
 }
 function cloudUI(){
@@ -719,7 +825,9 @@ async function cloudRefresh(){
 async function cloudSave(){
   if(cloudBusy)return;cloudBusy=true;cloudUI();
   try{
-    const payload={id:state.id||'',event:state.event,route:routeForSheet(),
+    const A=state.alt,ev=Object.assign({},state.event);
+    if(A&&A.route&&A.route.length>1)ev.alt={name:A.name||'',official:A.official||'',laps:A.laps||'',route:routeForSheet(A.route,20000)}; // la segunda ruta viaja dentro del evento
+    const payload={id:state.id||'',event:ev,route:routeForSheet(),
       spots:sortedSpots().map(s=>({name:s.name,kmLabel:s.kmLabel,ph:s.ph,lat:+s.lat.toFixed(6),lng:+s.lng.toFixed(6),km:s.km}))};
     const r=await apiPost({action:'save',state:payload});
     state.id=r.id;state.updated=r.updated;state.dirty=false;save(true);
@@ -727,7 +835,10 @@ async function cloudSave(){
   }catch(e){cloudBusy=false;cloudErr='No se pudo guardar: '+e.message;cloudUI()}
 }
 function fromCloud(d){
-  return{id:d.id,updated:d.updated,dirty:false,event:Object.assign(blankEvent(),d.event),route:d.route||[],
+  const ev=Object.assign(blankEvent(),d.event);let A=ev.alt;delete ev.alt;
+  if(typeof A==='string')try{A=JSON.parse(A)}catch(e){A=null}
+  return{id:d.id,updated:d.updated,dirty:false,event:ev,route:d.route||[],
+    alt:A&&A.route&&A.route.length>1?{name:A.name||'',official:A.official||'',laps:A.laps||'',route:A.route}:null,
     spots:(d.spots||[]).filter(s=>isFinite(s.lat)&&isFinite(s.lng)).map(s=>Object.assign({id:uid()},s))};
 }
 async function cloudOpen(id){
