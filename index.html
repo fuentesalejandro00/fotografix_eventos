@@ -825,19 +825,30 @@ async function cloudRefresh(){
 async function cloudSave(){
   if(cloudBusy)return;cloudBusy=true;cloudUI();
   try{
-    const A=state.alt,ev=Object.assign({},state.event);
-    if(A&&A.route&&A.route.length>1)ev.alt={name:A.name||'',official:A.official||'',laps:A.laps||'',route:routeForSheet(A.route,20000)}; // la segunda ruta viaja dentro del evento
-    const payload={id:state.id||'',event:ev,route:routeForSheet(),
+    const blob=altBlob(),route=routeForSheet(state.route,blob?30000:45000);
+    if(blob)route.push(['ALT',blob]); // la segunda ruta viaja comprimida dentro de la celda de la ruta (el Apps Script la guarda tal cual)
+    const payload={id:state.id||'',event:state.event,route,
       spots:sortedSpots().map(s=>({name:s.name,kmLabel:s.kmLabel,ph:s.ph,lat:+s.lat.toFixed(6),lng:+s.lng.toFixed(6),km:s.km}))};
     const r=await apiPost({action:'save',state:payload});
     state.id=r.id;state.updated=r.updated;state.dirty=false;save(true);
     cloudBusy=false;await cloudRefresh();renderShare();toast('Guardado en Google Sheets');
   }catch(e){cloudBusy=false;cloudErr='No se pudo guardar: '+e.message;cloudUI()}
 }
+function altBlob(){ // segunda distancia comprimida, máx. ~14,000 caracteres
+  const A=state.alt;if(!A||!A.route||A.route.length<2)return'';
+  let tol=0.000005,b;
+  do{b=LZString.compressToBase64(JSON.stringify({n:A.name||'',o:A.official||'',l:A.laps||'',d:state.event.dist1||'',
+    r:simplify(A.route,tol).map(p=>[+p[0].toFixed(6),+p[1].toFixed(6)])}));tol*=2}while(b.length>14000);
+  return b;
+}
 function fromCloud(d){
   const ev=Object.assign(blankEvent(),d.event);let A=ev.alt;delete ev.alt;
   if(typeof A==='string')try{A=JSON.parse(A)}catch(e){A=null}
-  return{id:d.id,updated:d.updated,dirty:false,event:ev,route:d.route||[],
+  let route=d.route||[];if(typeof route==='string')try{route=JSON.parse(route)}catch(e){route=[]}
+  const tag=route.find(p=>Array.isArray(p)&&p[0]==='ALT');
+  if(tag)try{const o=JSON.parse(LZString.decompressFromBase64(tag[1]));A={name:o.n,official:o.o,laps:o.l,route:o.r};if(o.d&&!ev.dist1)ev.dist1=o.d}catch(e){console.warn(e)}
+  route=route.filter(p=>Array.isArray(p)&&isFinite(p[0])&&isFinite(p[1]));
+  return{id:d.id,updated:d.updated,dirty:false,event:ev,route,
     alt:A&&A.route&&A.route.length>1?{name:A.name||'',official:A.official||'',laps:A.laps||'',route:A.route}:null,
     spots:(d.spots||[]).filter(s=>isFinite(s.lat)&&isFinite(s.lng)).map(s=>Object.assign({id:uid()},s))};
 }
